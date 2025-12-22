@@ -5,6 +5,8 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_HASH = os.getenv("ADMIN_HASH")
+ADMIN_ID = 7776362946
+BOT_ID = "MoviesssBot_bot"
 
 CATEGORY_CHANNELS = {
     "movie"    : -1003656057056,   # ID چنل فیلم
