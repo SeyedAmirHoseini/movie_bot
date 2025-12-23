@@ -1,3 +1,4 @@
 .env
 getid.py
 __pycache__
+bot.db
