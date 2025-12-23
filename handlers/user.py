@@ -5,17 +5,21 @@ from config import CATEGORY_CHANNELS
 from handlers.admin.utils import is_admin
 from handlers.admin.menu import show_admin_menu
 from database.db import get_setting, get_required_channels
+from database.admin_helper import check_permission  # برای چک دسترسی‌های دقیق ادمین
 import base64
+
 # سشن برای ذخیره param لینک
 join_check_session = {}
+
 # تابع جدا برای حذف background
 async def schedule_deletion(context: ContextTypes.DEFAULT_TYPE, user_id: int, message_ids: list):
-    await asyncio.sleep(120) # ۲ دقیقه صبر
+    await asyncio.sleep(120)  # ۲ دقیقه صبر
     for msg_id in message_ids:
         try:
             await context.bot.delete_message(chat_id=user_id, message_id=msg_id)
         except:
-            pass # اگر پیام حذف شده یا دسترسی نباشه، ارور نده
+            pass  # اگر پیام حذف شده یا دسترسی نباشه، ارور نده
+
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     message = update.message
@@ -73,14 +77,14 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         notice = None
         if get_setting('delete_after_2min'):
             notice = await message.reply_text("📌 این محتوا بعد از ۲ دقیقه حذف می‌شود.")
-        # اجرای حذف در پس‌زمینه (بدون بلاک کردن هندلر)
+        # اجرای حذف در پس‌زمینه
         if get_setting('delete_after_2min'):
-            # ایجاد تسک background
             context.application.create_task(schedule_deletion(context, user_id, sent_messages + ([notice.message_id] if notice else [])))
         # پاک کردن سشن
         join_check_session.pop(user_id, None)
     except Exception:
         await message.reply_text("لینک اشتباه است یا مشکلی پیش آمد!")
+
 async def confirm_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -123,6 +127,7 @@ async def confirm_join_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await send_content(query.message, context, param, user_id)
     except Exception:
         await query.edit_message_text("❌ مشکلی پیش آمد. دوباره روی لینک کلیک کنید.")
+
 async def send_content(message, context: ContextTypes.DEFAULT_TYPE, param: str, user_id: int):
     decoded = base64.urlsafe_b64decode(param.encode()).decode()
     category, msg_ids_str = decoded.split(":")
@@ -145,12 +150,47 @@ async def send_content(message, context: ContextTypes.DEFAULT_TYPE, param: str, 
     if get_setting('delete_after_2min'):
         context.application.create_task(schedule_deletion(context, user_id, sent_messages + ([notice.message_id] if notice else [])))
     join_check_session.pop(user_id, None)
+
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("دستور اشتباهی وارد کردید")
         return
     await show_admin_menu(update, context)
+
+# دستور جدید: /myprofile
+async def myprofile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    user_id = user.id
+    full_name = user.full_name
+    username = f"@{user.username}" if user.username else "ندارد"
+
+    base_text = (
+        f"👤 <b>پروفایل شما</b>\n\n"
+        f"📛 نام: {full_name}\n"
+        f"🆔 آیدی عددی: <code>{user_id}</code>\n"
+        f"📧 یوزرنیم: {username}\n\n"
+    )
+
+    if is_admin(user_id):
+        videos = "✅ دارد" if check_permission(user_id, 'manage_videos') else "❌ ندارد"
+        settings = "✅ دارد" if check_permission(user_id, 'access_settings') else "❌ ندارد"
+        admins_perm = "✅ دارد" if check_permission(user_id, 'manage_admins') else "❌ ندارد"
+
+        admin_text = (
+            f"🔐 <b>وضعیت ادمین: فعال</b>\n\n"
+            f"🎥 مدیریت ویدیوها: {videos}\n"
+            f"⚙️ دسترسی به تنظیمات: {settings}\n"
+            f"👥 مدیریت ادمین‌ها: {admins_perm}\n\n"
+            f"برای ورود به پنل ادمین: /admin"
+        )
+        final_text = base_text + admin_text
+    else:
+        final_text = base_text
+
+    await update.message.reply_text(final_text, parse_mode="HTML")
+
 def register_user_handlers(app):
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("admin", admin_command))
+    app.add_handler(CommandHandler("myprofile", myprofile_command))  # دستور جدید
     app.add_handler(CallbackQueryHandler(confirm_join_callback, pattern="^confirm_join$"))

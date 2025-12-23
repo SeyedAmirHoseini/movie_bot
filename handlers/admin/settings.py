@@ -4,7 +4,8 @@ from database.db import (
     get_setting, set_setting,
     add_required_channel, remove_required_channel, get_required_channels
 )
-from .utils import is_admin, back_button
+from database.admin_helper import check_permission  # جدید
+from .utils import back_button
 from .menu import show_admin_menu
 settings_session = {}
 def get_settings_menu():
@@ -28,8 +29,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     query = update.callback_query
     await query.answer()
     uid = query.from_user.id
-    if not is_admin(uid):
-        return False
+    if not check_permission(uid, 'access_settings'):
+        await query.edit_message_text("⛔️ دسترسی غیرمجاز به تنظیمات")
+        return True
     data = query.data
     if data == "back_to_main":
         await show_admin_menu(update, context)
@@ -50,14 +52,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return True
     # اضافه کردن چنل (با متن)
     if data == "add_channel":
-        context = (
+        text = (
             """
 ➕ لطفاً آیدی یا @username چنل رو بفرست (مثل @mychannel یا -1001234567890):
 مهم: به یاد داشته باشید که ربات شما باید در چنل های عضویت اجباری ادمین باشند تا بتوانند عضویت را چک کنند پس اول ربات را ادمین کنید سپس در این بخش اضافه کنید.
             """
         )
         await query.edit_message_text(
-            context,
+            text,
             reply_markup=InlineKeyboardMarkup([back_button()])
         )
         settings_session[uid] = {"action": "add_channel"}
@@ -95,9 +97,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return False
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
-    if not user or not is_admin(user.id):
-        return False
     uid = user.id
+    if not check_permission(uid, 'access_settings'):
+        return False
     if uid not in settings_session or settings_session[uid].get("action") != "add_channel":
         return False
     channel_id = update.message.text.strip()
