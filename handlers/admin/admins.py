@@ -1,8 +1,15 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from database.admin_helper import add_admin, remove_admin, get_admins, check_permission, generate_hash
+from database.admin_helper import (
+    add_admin, remove_admin, get_admins, check_permission, generate_hash,
+    get_admin_permissions, update_admin_permissions
+)
 from .utils import back_button
 from .menu import show_admin_menu
+import os
+from dotenv import load_dotenv
+load_dotenv()
+ADMIN_HASH = os.getenv("ADMIN_HASH")
 
 admins_session = {}
 
@@ -17,7 +24,7 @@ PERMISSIONS_MENU = [
     [InlineKeyboardButton("🎥 مدیریت ویدیوها", callback_data="toggle_videos")],
     [InlineKeyboardButton("⚙️ دسترسی به تنظیمات", callback_data="toggle_settings")],
     [InlineKeyboardButton("👥 مدیریت ادمین‌ها", callback_data="toggle_admins")],
-    [InlineKeyboardButton("✅ تأیید و اضافه کردن", callback_data="confirm_add_admin")],
+    [InlineKeyboardButton("✅ ذخیره تغییرات", callback_data="save_permissions")],
     back_button()
 ]
 
@@ -27,16 +34,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     uid = query.from_user.id
     data = query.data
 
-    # فقط برای عملیات داخل بخش ادمین‌ها چک می‌کنیم
-    if data in ["admins_menu", "add_admin", "show_delete_admins", "list_admins",
-                "toggle_videos", "toggle_settings", "toggle_admins", "confirm_add_admin"] \
-       or data.startswith("delete_admin_"):
+    # چک دسترسی برای همه عملیات بخش ادمین‌ها
+    if data.startswith(("admins_", "add_admin", "show_delete_admins", "list_admins", "edit_perm_", "toggle_", "save_permissions", "delete_admin_")):
         if not check_permission(uid, 'manage_admins'):
             await query.edit_message_text("⛔️ دسترسی غیرمجاز به مدیریت ادمین‌ها")
             return True
 
     if data == "admins_menu":
-        await query.edit_message_text("👥 مدیریت ادمین‌ها:", reply_markup=InlineKeyboardMarkup(ADMINS_MENU))
+        # منوی اصلی با دکمه اضافی برای سوپر ادمین
+        menu = ADMINS_MENU.copy()
+        if generate_hash(uid) == ADMIN_HASH:
+            menu.insert(-1, [InlineKeyboardButton("⚙️ تغییر سطح دسترسی", callback_data="edit_permissions_menu")])
+        await query.edit_message_text("👥 مدیریت ادمین‌ها:", reply_markup=InlineKeyboardMarkup(menu))
         return True
 
     if data == "back_to_main":
@@ -47,17 +56,80 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if data == "add_admin":
         await query.edit_message_text(
             "➕ برای اضافه کردن ادمین جدید:\n\n"
-            "از کاربر بخواه به ربات پیام بده و این دستور رو بزنه:\n\n"
-            "<code>/myprofile</code>\n\n"
-            "ربات آیدی عددی و اطلاعاتش رو نشون می‌ده.\n"
-            "آیدی عددی رو کپی کن و اینجا بفرست.",
-            parse_mode="HTML",
+            "آیدی عددی کاربر رو بفرست (مثل 123456789)\n\n"
+            "از /myprofile هم می‌تونی آیدی بگیری.",
             reply_markup=InlineKeyboardMarkup([back_button()])
         )
         admins_session[uid] = {
             "action": "waiting_for_id",
             "permissions": {"videos": True, "settings": True, "admins": False}
         }
+        return True
+
+    # منوی انتخاب ادمین برای ویرایش دسترسی
+    if data == "edit_permissions_menu":
+        admins = get_admins()
+        keyboard = []
+        for adm in admins:
+            user_id, hashed, _, _, _ = adm
+            if hashed != ADMIN_HASH:  # سوپر ادمین رو نشون نده
+                keyboard.append([InlineKeyboardButton(f"✏️ ویرایش {user_id}", callback_data=f"edit_perm_{user_id}")])
+        keyboard.append(back_button())
+        if not keyboard[:-1]:
+            await query.edit_message_text("هیچ ادمین معمولی برای ویرایش وجود ندارد.", reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await query.edit_message_text("⚙️ انتخاب کنید کدام ادمین را ویرایش کنید:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return True
+
+    # ویرایش دسترسی یک ادمین خاص
+    if data.startswith("edit_perm_"):
+        target_id = int(data[len("edit_perm_"):])
+        perms = get_admin_permissions(target_id)
+        admins_session[uid] = {
+            "action": "editing_permissions",
+            "target_id": target_id,
+            "permissions": perms.copy()
+        }
+        menu = [
+            [InlineKeyboardButton(f"🎥 مدیریت ویدیوها: {'✅' if perms['videos'] else '❌'}", callback_data="toggle_videos")],
+            [InlineKeyboardButton(f"⚙️ دسترسی به تنظیمات: {'✅' if perms['settings'] else '❌'}", callback_data="toggle_settings")],
+            [InlineKeyboardButton(f"👥 مدیریت ادمین‌ها: {'✅' if perms['admins'] else '❌'}", callback_data="toggle_admins")],
+            [InlineKeyboardButton("✅ ذخیره تغییرات", callback_data="save_permissions")],
+            back_button()
+        ]
+        await query.edit_message_text(f"✏️ ویرایش دسترسی‌های ادمین <code>{target_id}</code>:", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(menu))
+        return True
+
+    if data.startswith("toggle_") and admins_session.get(uid, {}).get("action") == "editing_permissions":
+        session = admins_session[uid]
+        perm = data[7:]
+        if perm == "videos":
+            session["permissions"]["videos"] = not session["permissions"]["videos"]
+        elif perm == "settings":
+            session["permissions"]["settings"] = not session["permissions"]["settings"]
+        elif perm == "admins":
+            session["permissions"]["admins"] = not session["permissions"]["admins"]
+
+        perms = session["permissions"]
+        menu = [
+            [InlineKeyboardButton(f"🎥 مدیریت ویدیوها: {'✅' if perms['videos'] else '❌'}", callback_data="toggle_videos")],
+            [InlineKeyboardButton(f"⚙️ دسترسی به تنظیمات: {'✅' if perms['settings'] else '❌'}", callback_data="toggle_settings")],
+            [InlineKeyboardButton(f"👥 مدیریت ادمین‌ها: {'✅' if perms['admins'] else '❌'}", callback_data="toggle_admins")],
+            [InlineKeyboardButton("✅ ذخیره تغییرات", callback_data="save_permissions")],
+            back_button()
+        ]
+        await query.edit_message_text(f"✏️ ویرایش دسترسی‌های ادمین <code>{session['target_id']}</code>:", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(menu))
+        return True
+
+    if data == "save_permissions":
+        session = admins_session.get(uid, {})
+        if session.get("action") != "editing_permissions":
+            return False
+        target_id = session["target_id"]
+        perms = session["permissions"]
+        update_admin_permissions(target_id, perms["videos"], perms["settings"], perms["admins"])
+        await query.edit_message_text(f"✅ دسترسی‌های ادمین <code>{target_id}</code> با موفقیت بروزرسانی شد!", parse_mode="HTML")
+        admins_session.pop(uid, None)
         return True
 
     if data.startswith("toggle_"):
@@ -93,32 +165,46 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "list_admins":
         admins = get_admins()
-        if not admins:
-            text = "هیچ ادمینی ثبت نشده."
-        else:
-            text = "📄 لیست ادمین‌ها:\n\n"
-            for adm in admins:
-                user_id, _, videos, settings, admins_perm = adm
-                text += f"• ID: <code>{user_id}</code>\n"
-                text += f"   ویدیوها: {'✅' if videos else '❌'} | تنظیمات: {'✅' if settings else '❌'} | ادمین‌ها: {'✅' if admins_perm else '❌'}\n\n"
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(ADMINS_MENU))
+        text = "📄 لیست ادمین‌ها:\n\n"
+        for adm in admins:
+            user_id, hashed, videos, settings, admins_perm = adm
+            if hashed == ADMIN_HASH:
+                text += f"👑 <b>سوپر ادمین</b>: <code>{user_id}</code>\n\n"
+            else:
+                v = '✅' if videos else '❌'
+                s = '✅' if settings else '❌'
+                a = '✅' if admins_perm else '❌'
+                text += f"• آیدی: <code>{user_id}</code>\n"
+                text += f"   ویدیوها: {v} | تنظیمات: {s} | ادمین‌ها: {a}\n\n"
+
+        # دکمه اضافی فقط برای سوپر ادمین
+        menu = [back_button()]
+        if generate_hash(uid) == ADMIN_HASH:
+            menu.insert(0, [InlineKeyboardButton("⚙️ تغییر سطح دسترسی", callback_data="edit_permissions_menu")])
+
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(menu))
         return True
 
     if data == "show_delete_admins":
         admins = get_admins()
-        if not admins:
-            await query.edit_message_text("هیچ ادمینی برای حذف وجود ندارد.", reply_markup=InlineKeyboardMarkup(ADMINS_MENU))
-            return True
         keyboard = []
         for adm in admins:
-            user_id = adm[0]
-            keyboard.append([InlineKeyboardButton(f"🗑 حذف {user_id}", callback_data=f"delete_admin_{user_id}")])
+            user_id, hashed, _, _, _ = adm
+            if hashed != ADMIN_HASH:
+                keyboard.append([InlineKeyboardButton(f"🗑 حذف {user_id}", callback_data=f"delete_admin_{user_id}")])
         keyboard.append(back_button())
-        await query.edit_message_text("❌ روی ادمینی که قصد حذف دارید کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard))
+        if len(keyboard) == 1:
+            await query.edit_message_text("هیچ ادمینی برای حذف وجود ندارد.", reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await query.edit_message_text("❌ روی ادمینی که قصد حذف دارید کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard))
         return True
 
     if data.startswith("delete_admin_"):
         admin_id = int(data[len("delete_admin_"):])
+        hashed = generate_hash(admin_id)
+        if hashed == ADMIN_HASH:
+            await query.edit_message_text("❌ سوپر ادمین حذف‌شدنی نیست!")
+            return True
         if admin_id == uid:
             await query.edit_message_text("❌ نمی‌تونی خودت رو حذف کنی!")
             return True
@@ -126,7 +212,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.edit_message_text(f"🗑 ادمین {admin_id} با موفقیت حذف شد!", reply_markup=InlineKeyboardMarkup(ADMINS_MENU))
         return True
 
-    return False  # اگر هیچی نبود، بره به core یا settings
+    return False
 
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
