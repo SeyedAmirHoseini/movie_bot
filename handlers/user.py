@@ -76,7 +76,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # پیام اطلاع‌رسانی (اختیاری)
         notice = None
         if get_setting('delete_after_2min'):
-            notice = await message.reply_text("📌 این محتوا بعد از ۲ دقیقه حذف می‌شود.")
+            notice = await message.reply_text("📄پیام‌ ها و فایل‌ های بالا بعد از 2 دقیقه پاک خواهند شد, لطفاً آن‌ ها را ذخیره کنید! ⏳")
         # اجرای حذف در پس‌زمینه
         if get_setting('delete_after_2min'):
             context.application.create_task(schedule_deletion(context, user_id, sent_messages + ([notice.message_id] if notice else [])))
@@ -146,14 +146,13 @@ async def send_content(message, context: ContextTypes.DEFAULT_TYPE, param: str, 
         sent_messages.append(sent.message_id)
     notice = None
     if get_setting('delete_after_2min'):
-        notice = await message.reply_text("📌 این محتوا بعد از ۲ دقیقه حذف می‌شود.")
+        notice = await message.reply_text("📄پیام‌ ها و فایل‌ های بالا بعد از 2 دقیقه پاک خواهند شد, لطفاً آن‌ ها را ذخیره کنید! ⏳")
     if get_setting('delete_after_2min'):
         context.application.create_task(schedule_deletion(context, user_id, sent_messages + ([notice.message_id] if notice else [])))
     join_check_session.pop(user_id, None)
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
-        await update.message.reply_text("دستور اشتباهی وارد کردید")
         return
     await show_admin_menu(update, context)
 
