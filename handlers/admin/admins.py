@@ -6,10 +6,7 @@ from database.admin_helper import (
 )
 from .utils import back_button
 from .menu import show_admin_menu
-import os
-from dotenv import load_dotenv
-load_dotenv()
-ADMIN_HASH = os.getenv("ADMIN_HASH")
+from config import ADMIN_HASH
 
 admins_session = {}
 

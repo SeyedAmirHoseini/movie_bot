@@ -1,13 +1,10 @@
 import hmac
 import hashlib
 import sqlite3
-import os
 from dotenv import load_dotenv
 from database.db import DB_FILE
+from config import BOT_TOKEN, ADMIN_HASH
 
-load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_HASH = os.getenv("ADMIN_HASH")
 
 def generate_hash(user_id: int) -> str:
     user_bytes = str(user_id).encode()
